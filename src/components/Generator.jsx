@@ -115,7 +115,7 @@ IMPORTANTE: Responda APENAS com o objeto JSON acima, em Português do Brasil. Se
 
     try {
       // PASSO 1: Descobre quais modelos existem para esta chave
-      console.log("[ImpactoCopy] Buscando modelos disponíveis para esta API Key...");
+      console.log("[ImpactoCopy] Buscando modelos disponíveis...");
 
       const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${userApiKey}`;
       const listResp = await fetch(listUrl);
@@ -139,57 +139,35 @@ IMPORTANTE: Responda APENAS com o objeto JSON acima, em Português do Brasil. Se
         m.supportedGenerationMethods?.includes("generateContent")
       );
 
-      console.log(`[ImpactoCopy] ${genModels.length} modelos encontrados com generateContent:`,
+      console.log(`[ImpactoCopy] ${genModels.length} modelos com generateContent:`,
         genModels.map(m => m.name)
       );
 
-      // Prioridade: flash (rápido e grátis) > pro > qualquer outro
-      const priority = [
-        'gemini-2.0-flash',
-        'gemini-2.0-flash-001',
-        'gemini-1.5-flash',
-        'gemini-1.5-flash-latest',
-        'gemini-1.5-flash-002',
-        'gemini-1.5-flash-001',
-        'gemini-2.0-flash-lite',
-        'gemini-1.5-pro',
-        'gemini-1.5-pro-latest',
-        'gemini-pro',
+      if (genModels.length === 0) {
+        throw new Error("Nenhum modelo disponível para esta chave.");
+      }
+
+      // Ordena por prioridade: flash-lite > flash > pro > outros
+      // flash-lite tem maior quota gratuita, depois flash, depois pro
+      const priorityKeywords = [
+        'flash-lite', 'flash-8b', 'flash',  'pro', 'ultra'
       ];
 
-      let chosenModel = null;
+      const sortedModels = [...genModels].sort((a, b) => {
+        const aName = a.name.toLowerCase();
+        const bName = b.name.toLowerCase();
+        const aIdx = priorityKeywords.findIndex(k => aName.includes(k));
+        const bIdx = priorityKeywords.findIndex(k => bName.includes(k));
+        const aPri = aIdx === -1 ? 999 : aIdx;
+        const bPri = bIdx === -1 ? 999 : bIdx;
+        return aPri - bPri;
+      });
 
-      // Tenta encontrar pela lista de prioridade
-      for (const preferred of priority) {
-        const found = genModels.find(m =>
-          m.name === `models/${preferred}`
-        );
-        if (found) {
-          chosenModel = found.name;
-          break;
-        }
-      }
+      console.log("[ImpactoCopy] Ordem de tentativa:",
+        sortedModels.map(m => m.name)
+      );
 
-      // Se nenhum da lista de prioridade foi encontrado, usa o primeiro flash disponível
-      if (!chosenModel) {
-        const anyFlash = genModels.find(m => m.name.toLowerCase().includes('flash'));
-        if (anyFlash) chosenModel = anyFlash.name;
-      }
-
-      // Último recurso: usa qualquer modelo disponível
-      if (!chosenModel && genModels.length > 0) {
-        chosenModel = genModels[0].name;
-      }
-
-      if (!chosenModel) {
-        throw new Error("Nenhum modelo de IA disponível para esta chave. Verifique se a chave está ativa no AI Studio.");
-      }
-
-      console.log(`[ImpactoCopy] ✅ Modelo escolhido: ${chosenModel}`);
-
-      // PASSO 2: Faz a chamada de geração com o modelo correto
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/${chosenModel}:generateContent?key=${userApiKey}`;
-
+      // PASSO 2: Tenta cada modelo até um funcionar
       const payload = {
         contents: [{ parts: [{ text: fullPrompt }] }],
         generationConfig: {
@@ -197,46 +175,75 @@ IMPORTANTE: Responda APENAS com o objeto JSON acima, em Português do Brasil. Se
         }
       };
 
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      let lastError = null;
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        const errMsg = errData?.error?.message || `HTTP ${response.status}`;
-        console.error(`[ImpactoCopy] Geração falhou (${chosenModel}):`, errMsg);
-        throw new Error(errMsg);
-      }
+      for (const model of sortedModels) {
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/${model.name}:generateContent?key=${userApiKey}`;
 
-      const result = await response.json();
-      const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        try {
+          console.log(`[ImpactoCopy] Tentando ${model.name}...`);
 
-      if (!rawText) {
-        console.error("[ImpactoCopy] Resposta sem texto:", result);
-        throw new Error("A IA retornou uma resposta vazia.");
-      }
+          const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
 
-      console.log(`[ImpactoCopy] Resposta recebida. Extraindo JSON...`);
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            const errMsg = errData?.error?.message || `HTTP ${response.status}`;
+            console.warn(`[ImpactoCopy] ${model.name} → ${errMsg}`);
+            lastError = errMsg;
 
-      const jsonResponse = extractJSON(rawText);
+            // Se é quota/rate limit, tenta o próximo modelo
+            if (response.status === 429 || errMsg.toLowerCase().includes("quota") || errMsg.toLowerCase().includes("rate")) {
+              console.log(`[ImpactoCopy] Quota esgotada em ${model.name}, tentando próximo...`);
+              continue;
+            }
+            // Outros erros (permissão, modelo não encontrado), também tenta próximo
+            continue;
+          }
 
-      if (!isValidHeadlineResponse(jsonResponse)) {
-        console.error("[ImpactoCopy] JSON inválido:", jsonResponse);
-        throw new Error("A IA retornou dados em formato inesperado. Tente novamente.");
-      }
+          const result = await response.json();
+          const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
 
-      // Garante que 'explicacao' existe em todos os ângulos
-      for (const key of ['dor', 'desejo', 'prova']) {
-        if (!jsonResponse[key].explicacao) {
-          jsonResponse[key].explicacao = '';
+          if (!rawText) {
+            console.warn(`[ImpactoCopy] ${model.name}: resposta sem texto`);
+            lastError = "A IA retornou uma resposta vazia.";
+            continue;
+          }
+
+          console.log(`[ImpactoCopy] ✅ ${model.name} respondeu! Extraindo JSON...`);
+
+          const jsonResponse = extractJSON(rawText);
+
+          if (!isValidHeadlineResponse(jsonResponse)) {
+            console.warn(`[ImpactoCopy] ${model.name}: estrutura JSON inválida`, jsonResponse);
+            lastError = "A IA retornou dados em formato inesperado.";
+            continue;
+          }
+
+          // Garante que 'explicacao' existe em todos os ângulos
+          for (const key of ['dor', 'desejo', 'prova']) {
+            if (!jsonResponse[key].explicacao) {
+              jsonResponse[key].explicacao = '';
+            }
+          }
+
+          setResults(jsonResponse);
+          setEditedResults(jsonResponse);
+          onShowToast("Headlines geradas com sucesso! 🚀", "success");
+          return; // SUCESSO — sai da função
+
+        } catch (err) {
+          console.warn(`[ImpactoCopy] ${model.name} erro:`, err.message);
+          lastError = err.message;
+          continue;
         }
       }
 
-      setResults(jsonResponse);
-      setEditedResults(jsonResponse);
-      onShowToast("Headlines geradas com sucesso! 🚀", "success");
+      // Se chegou aqui, TODOS os modelos falharam
+      throw new Error(lastError || "Nenhum modelo respondeu.");
 
     } catch (err) {
       console.error("[ImpactoCopy] Erro final:", err);
@@ -245,8 +252,8 @@ IMPORTANTE: Responda APENAS com o objeto JSON acima, em Português do Brasil. Se
         ? "Chave API inválida. Verifique nas configurações."
         : msg.includes("PERMISSION_DENIED")
         ? "Chave sem permissão. Gere uma nova chave no AI Studio."
-        : msg.includes("quota") || msg.includes("429")
-        ? "Limite de requisições atingido. Aguarde alguns minutos."
+        : msg.includes("quota") || msg.includes("429") || msg.includes("rate")
+        ? "Limite de uso atingido em todos os modelos. Aguarde 1 minuto e tente novamente."
         : msg || "Erro na geração. Verifique sua API Key.";
       onShowToast(userMessage, "error");
     } finally {
