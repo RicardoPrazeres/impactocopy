@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { auth, googleProvider } from '../firebase';
-import { signInWithPopup } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect } from 'firebase/auth';
 import { Sparkles, AlertCircle } from 'lucide-react';
 
 export default function Login({ onShowToast }) {
@@ -14,11 +14,31 @@ export default function Login({ onShowToast }) {
       await signInWithPopup(auth, googleProvider);
       onShowToast("Login realizado com sucesso!", "success");
     } catch (err) {
-      console.error(err);
-      setError("Ocorreu um erro ao fazer login. Verifique sua conexão e tente novamente.");
-      onShowToast("Falha na autenticação", "error");
+      console.error("Erro no signInWithPopup:", err);
+      // Códigos comuns onde popups falham ou são bloqueados (especialmente em WebViews ou Safari mobile)
+      if (
+        err.code === 'auth/popup-blocked' || 
+        err.code === 'auth/operation-not-supported' ||
+        err.code === 'auth/popup-closed-by-user' ||
+        /iPad|iPhone|iPod/.test(navigator.userAgent) // Forçar redirect em iOS por conta do ITP se der erro
+      ) {
+        try {
+          console.log("[ImpactoCopy] Popup bloqueado ou não suportado. Tentando signInWithRedirect...");
+          await signInWithRedirect(auth, googleProvider);
+        } catch (redirErr) {
+          console.error("Erro no signInWithRedirect:", redirErr);
+          setError("O seu navegador bloqueou o login. Por favor, tente abrir o link diretamente no Chrome ou Safari.");
+          onShowToast("Falha na autenticação", "error");
+        }
+      } else {
+        setError("Ocorreu um erro ao fazer login. Verifique sua conexão e tente novamente.");
+        onShowToast("Falha na autenticação", "error");
+      }
     } finally {
-      setLoading(false);
+      // Nota: Não desativamos o loading se redirecionou, pois a página vai recarregar
+      if (!window.location.search.includes('redirect')) {
+        setLoading(false);
+      }
     }
   };
 

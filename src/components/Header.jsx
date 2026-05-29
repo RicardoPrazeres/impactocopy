@@ -90,7 +90,7 @@ export default function Header({ activeTab, setActiveTab, savedCount, onOpenSett
               />
               <div className="hidden md:block pr-1">
                 <p className="text-xs font-bold text-stone-800 leading-tight truncate max-w-[100px]">
-                  {user?.displayName?.split(' ')[0]}
+                  {user?.displayName ? user.displayName.split(' ')[0] : 'Usuário'}
                 </p>
                 <p className="text-[10px] text-stone-400 font-semibold leading-none truncate max-w-[100px]">
                   Painel
@@ -105,7 +105,7 @@ export default function Header({ activeTab, setActiveTab, savedCount, onOpenSett
                 <div className="fixed inset-0 z-40" onClick={() => setDropdownOpen(false)} />
                 <div className="absolute right-0 mt-2 w-56 bg-white border border-stone-150 rounded-2xl shadow-xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                   <div className="px-4 py-2 border-b border-stone-100">
-                    <p className="text-xs font-bold text-stone-800">{user?.displayName}</p>
+                    <p className="text-xs font-bold text-stone-800">{user?.displayName || 'Usuário'}</p>
                     <p className="text-[10px] text-stone-400 truncate">{user?.email}</p>
                   </div>
                   
