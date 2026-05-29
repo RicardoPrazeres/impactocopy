@@ -95,8 +95,8 @@ Instruções adicionais de copywriting:
 3. Para o ângulo de PROVA: Foque em estudos científicos, números agressivos plausíveis, autoridade, validação empírica ou sensação de método testado e comprovado.
 Por favor, responda exclusivamente com o objeto JSON estruturado válido em Português do Brasil.`;
 
-    // Utiliza o endpoint estável do Gemini 1.5 Flash
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${userApiKey}`;
+    // Utiliza o endpoint estável v1 do Gemini 1.5 Flash
+    const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${userApiKey}`;
 
     const payload = {
       contents: [{ parts: [{ text: userPrompt }] }],
