@@ -162,7 +162,14 @@ Por favor, responda exclusivamente com o objeto JSON estruturado válido em Port
       }
 
       if (!response || !response.ok) {
-        throw new Error("Erro na comunicação com a IA.");
+        let errorMsg = "Erro na comunicação com a IA.";
+        try {
+          const errData = await response.json();
+          if (errData && errData.error && errData.error.message) {
+            errorMsg = `Erro: ${errData.error.message}`;
+          }
+        } catch (_) {}
+        throw new Error(errorMsg);
       }
 
       const result = await response.json();
@@ -179,7 +186,7 @@ Por favor, responda exclusivamente com o objeto JSON estruturado válido em Port
 
     } catch (err) {
       console.error(err);
-      onShowToast("Ocorreu um erro ao gerar. Verifique sua chave API do Gemini nas configurações.", "error");
+      onShowToast(err.message || "Erro na geração. Verifique sua API Key nas configurações.", "error");
     } finally {
       setLoading(false);
     }
