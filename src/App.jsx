@@ -17,6 +17,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('generator');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userApiKey, setUserApiKey] = useState('');
+  const [globalApiKey, setGlobalApiKey] = useState('');
   const [savedHeadlines, setSavedHeadlines] = useState([]);
   
   // Estado das notificações flutuantes (Toast)
@@ -43,6 +44,7 @@ export default function App() {
   useEffect(() => {
     if (!user) {
       setUserApiKey('');
+      setGlobalApiKey('');
       setSavedHeadlines([]);
       return;
     }
@@ -58,7 +60,18 @@ export default function App() {
       console.error("Erro escutando documento do usuário:", err);
     });
 
-    // 2. Escuta em tempo real as headlines favoritas salvas no Firestore
+    // 2. Escuta em tempo real a Chave Mestra global do app (settings/global) no Firestore
+    const unsubscribeGlobalDoc = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
+      if (docSnap.exists()) {
+        setGlobalApiKey(docSnap.data().geminiApiKey || '');
+      } else {
+        setGlobalApiKey('');
+      }
+    }, (err) => {
+      console.error("Erro ao escutar Chave Mestra global:", err);
+    });
+
+    // 3. Escuta em tempo real as headlines favoritas salvas no Firestore
     const favsQuery = query(
       collection(db, 'users', user.uid, 'favorites'),
       orderBy('createdAt', 'desc')
@@ -79,6 +92,7 @@ export default function App() {
 
     return () => {
       unsubscribeUserDoc();
+      unsubscribeGlobalDoc();
       unsubscribeFavorites();
     };
   }, [user]);
@@ -119,7 +133,7 @@ export default function App() {
         {activeTab === 'generator' && (
           <Generator 
             user={user}
-            userApiKey={userApiKey}
+            userApiKey={userApiKey || globalApiKey}
             onOpenSettings={() => setSettingsOpen(true)}
             onShowToast={showToast}
           />
