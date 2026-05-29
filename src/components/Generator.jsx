@@ -95,49 +95,22 @@ Instruções adicionais de copywriting:
 3. Para o ângulo de PROVA: Foque em estudos científicos, números agressivos plausíveis, autoridade, validação empírica ou sensação de método testado e comprovado.
 Por favor, responda exclusivamente com o objeto JSON estruturado válido em Português do Brasil.`;
 
-    // Utiliza o endpoint de desenvolvimento v1beta que suporta structured JSON e systemInstruction
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${userApiKey}`;
+    // Utiliza o endpoint v1 estável, combinando as instruções do sistema com o prompt do usuário para máxima compatibilidade com chaves novas (AQ.) e antigas.
+    const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${userApiKey}`;
+
+    const combinedPrompt = `${systemPrompt}
+
+---
+
+REQUISITO DO USUÁRIO E INFORMAÇÕES DO PRODUTO:
+${userPrompt}
+
+Lembre-se: Responda APENAS com o objeto JSON estruturado válido em Português do Brasil, exatamente no formato especificado.`;
 
     const payload = {
-      contents: [{ parts: [{ text: userPrompt }] }],
+      contents: [{ parts: [{ text: combinedPrompt }] }],
       generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "OBJECT",
-          properties: {
-            dor: {
-              type: "OBJECT",
-              properties: {
-                headline: { type: "STRING" },
-                subheadline: { type: "STRING" },
-                explicacao: { type: "STRING" }
-              },
-              required: ["headline", "subheadline", "explicacao"]
-            },
-            desejo: {
-              type: "OBJECT",
-              properties: {
-                headline: { type: "STRING" },
-                subheadline: { type: "STRING" },
-                explicacao: { type: "STRING" }
-              },
-              required: ["headline", "subheadline", "explicacao"]
-            },
-            prova: {
-              type: "OBJECT",
-              properties: {
-                headline: { type: "STRING" },
-                subheadline: { type: "STRING" },
-                explicacao: { type: "STRING" }
-              },
-              required: ["headline", "subheadline", "explicacao"]
-            }
-          },
-          required: ["dor", "desejo", "prova"]
-        }
-      },
-      systemInstruction: {
-        parts: [{ text: systemPrompt }]
+        responseMimeType: "application/json"
       }
     };
 
