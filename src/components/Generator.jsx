@@ -41,6 +41,28 @@ export default function Generator({ user, userApiKey, onOpenSettings, onShowToas
     return () => clearInterval(interval);
   }, [loading]);
 
+  // Extrai JSON de forma segura, mesmo se a IA retornar envolto em ```json ... ```
+  const extractJSON = (rawText) => {
+    let text = rawText.trim();
+    // Remove blocos de código markdown se existirem
+    const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+    if (codeBlockMatch) {
+      text = codeBlockMatch[1].trim();
+    }
+    return JSON.parse(text);
+  };
+
+  // Valida se o objeto tem a estrutura esperada com as 3 chaves
+  const isValidHeadlineResponse = (obj) => {
+    if (!obj || typeof obj !== 'object') return false;
+    for (const key of ['dor', 'desejo', 'prova']) {
+      if (!obj[key] || typeof obj[key].headline !== 'string' || typeof obj[key].subheadline !== 'string') {
+        return false;
+      }
+    }
+    return true;
+  };
+
   const handleGenerate = async () => {
     if (!product.trim()) {
       onShowToast("Por favor, preencha o campo do produto ou oferta!", "error");
@@ -56,110 +78,127 @@ export default function Generator({ user, userApiKey, onOpenSettings, onShowToas
     setLoading(true);
     setResults(null);
 
-    const systemPrompt = `Você é um copywriter de resposta direta de elite (nível Stefan Georgi e Justin Goff).
-O seu objetivo é estruturar 3 tipos específicos de Headlines para atrair compradores, baseadas na descrição do produto, público e nicho informados pelo usuário.
-Retorne um objeto JSON contendo exatamente três chaves principais: "dor", "desejo" e "prova".
-Cada uma destas chaves deve conter um objeto com os seguintes campos string:
-- "headline": O título principal de alta conversão, chamativo e impossível de ignorar.
-- "subheadline": Um subtítulo de apoio que constrói curiosidade e estimula o clique.
-- "explicacao": Um breve feedback de uma frase explicando por que este ângulo funciona.
+    const fullPrompt = `Você é um copywriter de resposta direta de elite (nível Stefan Georgi e Justin Goff).
 
-Exemplo de estrutura de resposta esperada:
+TAREFA: Gere 3 Headlines de alta conversão para o produto abaixo, cada uma com um ângulo psicológico diferente.
+
+PRODUTO/OFERTA: "${product}"
+PÚBLICO-ALVO: "${audience || 'Pessoas com interesse real no tema'}"
+TOM DE VOZ: "${tone}"
+NICHO: "${niche}"
+
+ÂNGULOS OBRIGATÓRIOS:
+1. DOR — Toque em frustrações, cansaço, falta de tempo ou dinheiro.
+2. DESEJO — Foque em ganho rápido, status, liberdade, transformação.
+3. PROVA — Use números, estudos, autoridade, validação empírica.
+
+FORMATO DE RESPOSTA (JSON puro, sem texto extra):
 {
   "dor": {
-    "headline": "O erro de R$ 5,47 no Tráfego que está destruindo seu ROI semanal",
-    "subheadline": "Descubra o vazamento invisível que a maioria dos gestores ignora até zerar a conta bancária.",
-    "explicacao": "Ativa a aversão à perda rápida ao expor uma falha financeira comum."
+    "headline": "Título de alta conversão focado na dor do público",
+    "subheadline": "Subtítulo que constrói curiosidade e estimula o clique",
+    "explicacao": "Breve explicação de por que este ângulo funciona"
   },
   "desejo": {
-    "headline": "...",
-    "subheadline": "...",
-    "explicacao": "..."
+    "headline": "Título focado no desejo e aspiração",
+    "subheadline": "Subtítulo complementar",
+    "explicacao": "Breve explicação"
   },
   "prova": {
-    "headline": "...",
-    "subheadline": "...",
-    "explicacao": "..."
+    "headline": "Título focado em prova social e resultados",
+    "subheadline": "Subtítulo complementar",
+    "explicacao": "Breve explicação"
   }
-}`;
+}
 
-    const userPrompt = `Gere headlines altamente persuasivas para o produto a seguir.
-Produto/Oferta: "${product}"
-Público Alvo Principal: "${audience || 'Pessoas com interesse real no tema'}"
-Tom de Voz Solicitado: "${tone}"
-Nicho do Mercado: "${niche}"
+IMPORTANTE: Responda APENAS com o objeto JSON acima, em Português do Brasil. Sem texto antes ou depois.`;
 
-Instruções adicionais de copywriting:
-1. Para o ângulo de DOR: Toque em frustrações diárias, no cansaço, na falta de tempo ou dinheiro do público.
-2. Para o ângulo de DESEJO: Foque no ganho rápido, no status, na liberdade, na transformação rápida e desejável.
-3. Para o ângulo de PROVA: Foque em estudos científicos, números agressivos plausíveis, autoridade, validação empírica ou sensação de método testado e comprovado.
-Por favor, responda exclusivamente com o objeto JSON estruturado válido em Português do Brasil.`;
-
-    // Utiliza o endpoint v1 estável, combinando as instruções do sistema com o prompt do usuário para máxima compatibilidade com chaves novas (AQ.) e antigas.
-    const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${userApiKey}`;
-
-    const combinedPrompt = `${systemPrompt}
-
----
-
-REQUISITO DO USUÁRIO E INFORMAÇÕES DO PRODUTO:
-${userPrompt}
-
-Lembre-se: Responda APENAS com o objeto JSON estruturado válido em Português do Brasil, exatamente no formato especificado.`;
+    // Lista de endpoints para tentar em ordem (do mais moderno ao mais estável)
+    const endpoints = [
+      { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${userApiKey}`, label: 'v1beta/gemini-2.0-flash' },
+      { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${userApiKey}`, label: 'v1beta/gemini-1.5-flash' },
+      { url: `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${userApiKey}`, label: 'v1/gemini-1.5-flash' },
+    ];
 
     const payload = {
-      contents: [{ parts: [{ text: combinedPrompt }] }],
+      contents: [{ parts: [{ text: fullPrompt }] }],
       generationConfig: {
-        responseMimeType: "application/json"
+        temperature: 0.9
       }
     };
 
     try {
-      let response;
-      let delay = 1000;
-      const maxRetries = 3;
+      let lastError = null;
 
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      for (const endpoint of endpoints) {
         try {
-          response = await fetch(apiUrl, {
+          console.log(`[ImpactoCopy] Tentando: ${endpoint.label}`);
+
+          const response = await fetch(endpoint.url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
-          if (response.ok) break;
-        } catch (err) {
-          if (attempt === maxRetries) throw err;
-        }
-        await new Promise(resolve => setTimeout(resolve, delay));
-        delay *= 2;
-      }
 
-      if (!response || !response.ok) {
-        let errorMsg = "Erro na comunicação com a IA.";
-        try {
-          const errData = await response.json();
-          if (errData && errData.error && errData.error.message) {
-            errorMsg = `Erro: ${errData.error.message}`;
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            const errMsg = errData?.error?.message || `HTTP ${response.status}`;
+            console.warn(`[ImpactoCopy] ${endpoint.label} falhou: ${errMsg}`);
+            lastError = new Error(errMsg);
+            continue; // Tenta o próximo endpoint
           }
-        } catch (_) {}
-        throw new Error(errorMsg);
+
+          const result = await response.json();
+          const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+          if (!rawText) {
+            console.warn(`[ImpactoCopy] ${endpoint.label}: resposta sem texto`);
+            lastError = new Error("A IA retornou uma resposta vazia.");
+            continue;
+          }
+
+          console.log(`[ImpactoCopy] ${endpoint.label} respondeu OK. Extraindo JSON...`);
+
+          const jsonResponse = extractJSON(rawText);
+
+          if (!isValidHeadlineResponse(jsonResponse)) {
+            console.warn(`[ImpactoCopy] ${endpoint.label}: JSON não tem a estrutura esperada`, jsonResponse);
+            lastError = new Error("A IA retornou dados em formato inesperado.");
+            continue;
+          }
+
+          // Garante que 'explicacao' existe em todos os ângulos
+          for (const key of ['dor', 'desejo', 'prova']) {
+            if (!jsonResponse[key].explicacao) {
+              jsonResponse[key].explicacao = '';
+            }
+          }
+
+          setResults(jsonResponse);
+          setEditedResults(jsonResponse);
+          onShowToast("Headlines geradas com sucesso! 🚀", "success");
+          return; // Sucesso — sai da função
+
+        } catch (err) {
+          console.warn(`[ImpactoCopy] ${endpoint.label} erro:`, err.message);
+          lastError = err;
+          continue; // Tenta o próximo endpoint
+        }
       }
 
-      const result = await response.json();
-      const candidate = result.candidates?.[0];
-
-      if (candidate && candidate.content?.parts?.[0]?.text) {
-        const jsonResponse = JSON.parse(candidate.content.parts[0].text);
-        setResults(jsonResponse);
-        setEditedResults(jsonResponse);
-        onShowToast("Novas Headlines geradas com sucesso!", "success");
-      } else {
-        throw new Error("Resposta inválida do servidor.");
-      }
+      // Se chegou aqui, todos os endpoints falharam
+      throw lastError || new Error("Todos os modelos falharam.");
 
     } catch (err) {
-      console.error(err);
-      onShowToast(err.message || "Erro na geração. Verifique sua API Key nas configurações.", "error");
+      console.error("[ImpactoCopy] Erro final:", err);
+      const userMessage = err.message?.includes("API_KEY_INVALID")
+        ? "Chave API inválida. Verifique nas configurações."
+        : err.message?.includes("PERMISSION_DENIED")
+        ? "Chave sem permissão. Gere uma nova chave no AI Studio."
+        : err.message?.includes("quota")
+        ? "Limite de requisições atingido. Aguarde alguns minutos."
+        : err.message || "Erro na geração. Verifique sua API Key.";
+      onShowToast(userMessage, "error");
     } finally {
       setLoading(false);
     }
