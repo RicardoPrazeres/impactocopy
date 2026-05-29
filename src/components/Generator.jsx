@@ -113,91 +113,141 @@ FORMATO DE RESPOSTA (JSON puro, sem texto extra):
 
 IMPORTANTE: Responda APENAS com o objeto JSON acima, em Português do Brasil. Sem texto antes ou depois.`;
 
-    // Lista de endpoints para tentar em ordem (do mais moderno ao mais estável)
-    const endpoints = [
-      { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${userApiKey}`, label: 'v1beta/gemini-2.0-flash' },
-      { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${userApiKey}`, label: 'v1beta/gemini-1.5-flash' },
-      { url: `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${userApiKey}`, label: 'v1/gemini-1.5-flash' },
-    ];
-
-    const payload = {
-      contents: [{ parts: [{ text: fullPrompt }] }],
-      generationConfig: {
-        temperature: 0.9
-      }
-    };
-
     try {
-      let lastError = null;
+      // PASSO 1: Descobre quais modelos existem para esta chave
+      console.log("[ImpactoCopy] Buscando modelos disponíveis para esta API Key...");
 
-      for (const endpoint of endpoints) {
-        try {
-          console.log(`[ImpactoCopy] Tentando: ${endpoint.label}`);
+      const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${userApiKey}`;
+      const listResp = await fetch(listUrl);
 
-          const response = await fetch(endpoint.url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
+      if (!listResp.ok) {
+        const errData = await listResp.json().catch(() => ({}));
+        const errMsg = errData?.error?.message || `HTTP ${listResp.status}`;
+        console.error("[ImpactoCopy] Erro ao listar modelos:", errMsg);
+        throw new Error(
+          errMsg.includes("API_KEY_INVALID")
+            ? "Chave API inválida. Verifique nas configurações."
+            : `Erro ao validar chave: ${errMsg}`
+        );
+      }
 
-          if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            const errMsg = errData?.error?.message || `HTTP ${response.status}`;
-            console.warn(`[ImpactoCopy] ${endpoint.label} falhou: ${errMsg}`);
-            lastError = new Error(errMsg);
-            continue; // Tenta o próximo endpoint
-          }
+      const listData = await listResp.json();
+      const allModels = listData.models || [];
 
-          const result = await response.json();
-          const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+      // Filtra modelos que suportam generateContent
+      const genModels = allModels.filter(m =>
+        m.supportedGenerationMethods?.includes("generateContent")
+      );
 
-          if (!rawText) {
-            console.warn(`[ImpactoCopy] ${endpoint.label}: resposta sem texto`);
-            lastError = new Error("A IA retornou uma resposta vazia.");
-            continue;
-          }
+      console.log(`[ImpactoCopy] ${genModels.length} modelos encontrados com generateContent:`,
+        genModels.map(m => m.name)
+      );
 
-          console.log(`[ImpactoCopy] ${endpoint.label} respondeu OK. Extraindo JSON...`);
+      // Prioridade: flash (rápido e grátis) > pro > qualquer outro
+      const priority = [
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-001',
+        'gemini-1.5-flash',
+        'gemini-1.5-flash-latest',
+        'gemini-1.5-flash-002',
+        'gemini-1.5-flash-001',
+        'gemini-2.0-flash-lite',
+        'gemini-1.5-pro',
+        'gemini-1.5-pro-latest',
+        'gemini-pro',
+      ];
 
-          const jsonResponse = extractJSON(rawText);
+      let chosenModel = null;
 
-          if (!isValidHeadlineResponse(jsonResponse)) {
-            console.warn(`[ImpactoCopy] ${endpoint.label}: JSON não tem a estrutura esperada`, jsonResponse);
-            lastError = new Error("A IA retornou dados em formato inesperado.");
-            continue;
-          }
-
-          // Garante que 'explicacao' existe em todos os ângulos
-          for (const key of ['dor', 'desejo', 'prova']) {
-            if (!jsonResponse[key].explicacao) {
-              jsonResponse[key].explicacao = '';
-            }
-          }
-
-          setResults(jsonResponse);
-          setEditedResults(jsonResponse);
-          onShowToast("Headlines geradas com sucesso! 🚀", "success");
-          return; // Sucesso — sai da função
-
-        } catch (err) {
-          console.warn(`[ImpactoCopy] ${endpoint.label} erro:`, err.message);
-          lastError = err;
-          continue; // Tenta o próximo endpoint
+      // Tenta encontrar pela lista de prioridade
+      for (const preferred of priority) {
+        const found = genModels.find(m =>
+          m.name === `models/${preferred}`
+        );
+        if (found) {
+          chosenModel = found.name;
+          break;
         }
       }
 
-      // Se chegou aqui, todos os endpoints falharam
-      throw lastError || new Error("Todos os modelos falharam.");
+      // Se nenhum da lista de prioridade foi encontrado, usa o primeiro flash disponível
+      if (!chosenModel) {
+        const anyFlash = genModels.find(m => m.name.toLowerCase().includes('flash'));
+        if (anyFlash) chosenModel = anyFlash.name;
+      }
+
+      // Último recurso: usa qualquer modelo disponível
+      if (!chosenModel && genModels.length > 0) {
+        chosenModel = genModels[0].name;
+      }
+
+      if (!chosenModel) {
+        throw new Error("Nenhum modelo de IA disponível para esta chave. Verifique se a chave está ativa no AI Studio.");
+      }
+
+      console.log(`[ImpactoCopy] ✅ Modelo escolhido: ${chosenModel}`);
+
+      // PASSO 2: Faz a chamada de geração com o modelo correto
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/${chosenModel}:generateContent?key=${userApiKey}`;
+
+      const payload = {
+        contents: [{ parts: [{ text: fullPrompt }] }],
+        generationConfig: {
+          temperature: 0.9
+        }
+      };
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        const errMsg = errData?.error?.message || `HTTP ${response.status}`;
+        console.error(`[ImpactoCopy] Geração falhou (${chosenModel}):`, errMsg);
+        throw new Error(errMsg);
+      }
+
+      const result = await response.json();
+      const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!rawText) {
+        console.error("[ImpactoCopy] Resposta sem texto:", result);
+        throw new Error("A IA retornou uma resposta vazia.");
+      }
+
+      console.log(`[ImpactoCopy] Resposta recebida. Extraindo JSON...`);
+
+      const jsonResponse = extractJSON(rawText);
+
+      if (!isValidHeadlineResponse(jsonResponse)) {
+        console.error("[ImpactoCopy] JSON inválido:", jsonResponse);
+        throw new Error("A IA retornou dados em formato inesperado. Tente novamente.");
+      }
+
+      // Garante que 'explicacao' existe em todos os ângulos
+      for (const key of ['dor', 'desejo', 'prova']) {
+        if (!jsonResponse[key].explicacao) {
+          jsonResponse[key].explicacao = '';
+        }
+      }
+
+      setResults(jsonResponse);
+      setEditedResults(jsonResponse);
+      onShowToast("Headlines geradas com sucesso! 🚀", "success");
 
     } catch (err) {
       console.error("[ImpactoCopy] Erro final:", err);
-      const userMessage = err.message?.includes("API_KEY_INVALID")
+      const msg = err.message || "";
+      const userMessage = msg.includes("API_KEY_INVALID")
         ? "Chave API inválida. Verifique nas configurações."
-        : err.message?.includes("PERMISSION_DENIED")
+        : msg.includes("PERMISSION_DENIED")
         ? "Chave sem permissão. Gere uma nova chave no AI Studio."
-        : err.message?.includes("quota")
+        : msg.includes("quota") || msg.includes("429")
         ? "Limite de requisições atingido. Aguarde alguns minutos."
-        : err.message || "Erro na geração. Verifique sua API Key.";
+        : msg || "Erro na geração. Verifique sua API Key.";
       onShowToast(userMessage, "error");
     } finally {
       setLoading(false);
