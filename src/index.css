@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", sans-serif;
+  --font-heading: "Plus Jakarta Sans", sans-serif;
+  --animate-spin-slow: spin 12s linear infinite;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    @apply bg-[#fdfbf7] text-stone-800 antialiased min-h-screen flex flex-col justify-between;
+  }
+  h1, h2, h3, h4 {
+    font-family: var(--font-heading);
+  }
+}
+
+/* Barra de rolagem personalizada para preservar o visual premium limpo */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #fdfbf7;
+}
+::-webkit-scrollbar-thumb {
+  background: #fbd38d;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #f6ad55;
+}
+
+/* Elementos personalizados do sistema de design premium */
+.warm-gradient {
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 50%, #dc2626 100%);
+}
+.warm-gradient-soft {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+}
+.warm-glow {
+  box-shadow: 0 10px 30px -5px rgba(234, 88, 12, 0.15);
+}
+.warm-glow-focus:focus {
+  box-shadow: 0 0 0 4px rgba(234, 88, 12, 0.2);
+  border-color: #f97316;
+}
